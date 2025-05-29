@@ -74,10 +74,8 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
                 if title and date_utc_str and url:
                     utc_dt = datetime.strptime(date_utc_str, "%Y-%m-%dT%H:%M:%SZ")
                     jst_dt = utc_dt + timedelta(hours=9)
-                    # Windowsの場合のゼロ埋めなしフォーマット (Python 3.6+ のみ)
-                    formatted_date = jst_dt.strftime("%Y/%#m/%#d %H:%M") 
-                    # その他のOS (Linux/macOS) の場合、%m, %d でゼロ埋めされるため、必要に応じて .lstrip('0') を適用
-                    # 例: formatted_date = f"{jst_dt.year}/{jst_dt.month}/{jst_dt.day} {jst_dt.hour:02}:{jst_dt.minute:02}"
+                    # ゼロ埋めなしの月日、ゼロ埋めありの時分でフォーマット
+                    formatted_date = f"{jst_dt.year}/{jst_dt.month}/{jst_dt.day} {jst_dt.hour:02}:{jst_dt.minute:02}"
 
                     full_url = "https://news.google.com" + url[1:] if url.startswith("./articles/") else url
 
@@ -157,8 +155,7 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
                     date_str_clean = re.sub(r'\([月火水木金土日]\)', '', date_str).strip() 
                     try:
                         dt_obj = datetime.strptime(date_str_clean, "%Y/%m/%d %H:%M")
-                        # GitHub Actions (Linux) と Windows で %-m, %#m の挙動が異なる可能性を考慮し、
-                        # より汎用的なf-string形式を推奨（必要に応じて）
+                        # ゼロ埋めなしの月日、ゼロ埋めありの時分でフォーマット
                         formatted_date = f"{dt_obj.year}/{dt_obj.month}/{dt_obj.day} {dt_obj.hour:02}:{dt_obj.minute:02}"
                     except ValueError:
                         formatted_date = date_str_clean 
@@ -235,4 +232,95 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
             print("❌ エラー: GCP_SERVICE_ACCOUNT_KEY 環境変数が設定されておらず、credentials.json も見つかりません。")
             print("GitHub Actionsで実行していることを確認するか、ローカル実行の場合は credentials.json を配置してください。")
             return
-        except json.JSONDecodeError as e
+        except json.JSONDecodeError as e:
+            print(f"❌ エラー: credentials.json ファイルの形式が不正です。{e}")
+            return
+    
+    if not credentials:
+        print("認証情報を取得できませんでした。スプレッドシートへの書き込みをスキップします。")
+        return
+
+    try:
+        gc = gspread.service_account_from_dict(credentials)
+        print("Google Sheets API 認証に成功しました。")
+        
+        sh = gc.open_by_key(spreadsheet_id)
+        print(f"スプレッドシート '{spreadsheet_id}' を開きました。")
+        
+        worksheet = sh.worksheet(worksheet_name)
+        print(f"ワークシート '{worksheet_name}' を選択しました。")
+        
+        existing_data = worksheet.get_all_values()
+        
+        existing_urls = set()
+        if len(existing_data) > 1:
+            for row in existing_data[1:]:
+                if len(row) > 1: 
+                    existing_urls.add(row[1]) 
+        
+        print(f"既存のワークシート'{worksheet_name}'には {len(existing_urls)} 件のユニークなURLがあります。")
+
+        data_to_append = []
+        new_articles_count = 0
+
+        try:
+            # '投稿日'が 'YYYY/MM/DD HH:MM' 形式であることを前提
+            sorted_articles = sorted(
+                articles, 
+                key=lambda x: datetime.strptime(x.get('投稿日', '1900/01/01 00:00'), "%Y/%m/%d %H:%M"), 
+                reverse=True
+            )
+        except Exception as e:
+            print(f"警告: 日付フォーマットエラーのため、ソートが正しく行われない可能性があります: {e}")
+            sorted_articles = articles 
+
+        for article in sorted_articles:
+            if article.get('URL') and article.get('URL') not in existing_urls:
+                data_to_append.append([
+                    article.get('タイトル', ''),
+                    article.get('URL', ''),
+                    article.get('投稿日', ''),
+                    article.get('引用元', '')
+                ])
+                new_articles_count += 1
+                existing_urls.add(article.get('URL'))
+            
+        if data_to_append:
+            worksheet.append_rows(data_to_append, value_input_option='USER_ENTERED')
+            print(f"✅ {new_articles_count}件の新しいニュースデータをワークシート'{worksheet_name}'に追記しました。")
+        else:
+            print(f"⚠️ ワークシート'{worksheet_name}'に新しいニュースデータはありませんでした。")
+            
+    except gspread.exceptions.SpreadsheetNotFound:
+        print(f"⚠️ スプレッドシート '{spreadsheet_id}' が見つかりません。IDを確認してください。")
+        print("サービスアカウントにスプレッドシートへのアクセス権限が付与されていることを確認してください。")
+    except gspread.exceptions.APIError as e:
+        print(f"❌ Google Sheets API エラーが発生しました: {e}")
+        print(f"APIエラー詳細: {e.response.text if hasattr(e, 'response') else '詳細不明'}")
+        print("サービスアカウントの権限、またはスプレッドシートの共有設定を確認してください。")
+    except Exception as e:
+        print(f"❌ スプレッドシートへの書き込み中に予期せぬエラーが発生しました: {e}")
+
+
+if __name__ == "__main__":
+    print("🚀 ニュース取得を開始します...")
+    
+    # --- Googleニュースの取得と書き込み ---
+    print("\n--- Googleニュース ---")
+    google_news_articles = get_google_news_with_selenium(KEYWORD) 
+    if google_news_articles:
+        print(f"✨ Googleニュースから {len(google_news_articles)}件のニュースを取得しました。")
+        write_to_spreadsheet(google_news_articles, SPREADSHEET_ID, "Google") 
+    else:
+        print("🤔 Googleニュースが取得できませんでした。")
+    
+    # --- Yahoo!ニュースの取得と書き込み ---
+    print("\n--- Yahoo!ニュース ---")
+    yahoo_news_articles = get_yahoo_news_with_requests(KEYWORD)
+    if yahoo_news_articles:
+        print(f"✨ Yahoo!ニュースから {len(yahoo_news_articles)}件のニュースを取得しました。")
+        write_to_spreadsheet(yahoo_news_articles, SPREADSHEET_ID, "Yahoo") 
+    else:
+        print("🤔 Yahoo!ニュースが取得できませんでした。")
+    
+    print("\n✅ 全ニュース取得・書き込み完了")
