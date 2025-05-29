@@ -1,0 +1,54 @@
+name: Run News Scraper (Google & Yahoo)
+
+on:
+  schedule:
+    # 毎時0分に実行 (UTC)
+    # 例: UTC 0:00, 1:00, 2:00 ... に実行されます。
+    # 日本時間 (JST) は UTC + 9時間なので、JST 9:00, 10:00, 11:00 ... に実行されます。
+    - cron: '0 * * * *' 
+  
+  # 手動実行を可能にするトリガー
+  # GitHubのActionsタブから「Run workflow」ボタンでいつでも手動実行できます。
+  workflow_dispatch: 
+
+jobs:
+  scrape-news:
+    # ワークフローを実行する仮想環境を指定します。
+    # GitHubが提供する最新のUbuntu Linux環境を使用します。
+    runs-on: ubuntu-latest 
+
+    steps:
+    - name: Checkout repository
+      # GitHubリポジトリのコードをGitHub Actionsの仮想環境にチェックアウトします。
+      # これにより、main.py や requirements.txt などのファイルが利用可能になります。
+      uses: actions/checkout@v4 
+
+    - name: Set up Python
+      # Python環境をセットアップします。
+      # ここではPython 3.9 を使用しています。プロジェクトの要件に合わせて変更できます。
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' 
+
+    - name: Install dependencies
+      # pipを最新バージョンにアップグレードし、requirements.txtに記載されたPythonライブラリをインストールします。
+      # これには gspread, selenium, webdriver_manager, requests, beautifulsoup4 が含まれます。
+      # webdriver_manager が ChromeDriver のダウンロードとセットアップを自動的に行います。
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Scraper
+      # main.py スクリプトを実行します。
+      # env: ブロックで、GitHub Secretsで設定したGCP_SERVICE_ACCOUNT_KEYを環境変数としてスクリプトに渡します。
+      # スクリプトは 'os.environ.get('GCP_SERVICE_ACCOUNT_KEY')' でこの環境変数を読み込み、Google Sheets APIの認証に使用します。
+      env:
+        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      run: |
+        python main.py
+
+    - name: Check for workflow failure (optional)
+      # このステップは、ワークフローの前のステップでエラーが発生した場合にのみ実行されます。
+      # ログに失敗メッセージを出力し、デバッグ時に問題の特定に役立ちます。
+      if: ${{ failure() }}
+      run: echo "Workflow failed. Check logs for details."
