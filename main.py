@@ -19,7 +19,8 @@ from bs4 import BeautifulSoup
 import gspread
 
 # --- MSNニュース (Selenium + BeautifulSoup) 関連のインポート ---
-import pandas as pd # データ構造を一時的に作るのに使用
+# pandas は直接Excelに出力しないため、ここでは不要です。
+# import pandas as pd # <-- この行を削除しました
 
 
 # 共通設定
