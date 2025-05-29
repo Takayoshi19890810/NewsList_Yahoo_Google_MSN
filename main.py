@@ -14,7 +14,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 # --- Yahoo!ニュース (Requests + BeautifulSoup) 関連のインポート ---
 import requests
 from bs4 import BeautifulSoup
-# from urllib.parse import quote # URLエンコード用 (requestsが自動で処理する場合が多いが、念のため)
 
 # gspread関連のインポート
 import gspread
@@ -34,6 +33,7 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080") # ウィンドウサイズを設定（headlessで要素が見つからない場合などに有効）
 
     driver = None
     try:
@@ -52,15 +52,18 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
         driver.get(url)
         time.sleep(5)
 
+        # ページを複数回スクロールして動的なコンテンツの読み込みを促す
         for _ in range(3):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
 
+        # 'article' タグでニュース記事の要素を全て取得 (セレクタは動作確認済み)
         articles = driver.find_elements(By.TAG_NAME, "article")
         print(f"検出された記事要素の数 (Google): {len(articles)}")
 
         for i, article_elem in enumerate(articles):
             try:
+                # 各要素からタイトル、URL、投稿日、引用元を抽出
                 title_tag = article_elem.find_element(By.CSS_SELECTOR, "a.JtKRv")
                 date_tag = article_elem.find_element(By.CSS_SELECTOR, "time.hvbAAd")
                 source_tag = article_elem.find_element(By.CSS_SELECTOR, "div.vr1PYe")
@@ -73,9 +76,12 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
                 if title and date_utc_str and url:
                     utc_dt = datetime.strptime(date_utc_str, "%Y-%m-%dT%H:%M:%SZ")
                     jst_dt = utc_dt + timedelta(hours=9)
-                    formatted_date = jst_dt.strftime("%Y/%#m/%#d %H:%M") # Windows用
-                    # その他のOSの場合: formatted_date = jst_dt.strftime("%Y/%-m/%-d %H:%M")
+                    # Windowsの場合のゼロ埋めなしフォーマット (Python 3.6+ のみ)
+                    formatted_date = jst_dt.strftime("%Y/%#m/%#d %H:%M") 
+                    # その他のOS (Linux/macOS) の場合: formatted_date = jst_dt.strftime("%Y/%-m/%-d %H:%M")
+                    # 両対応させるなら f-string と .lstrip('0') を使う方法も考慮
 
+                    # 相対URLを絶対URLに変換
                     full_url = "https://news.google.com" + url[1:] if url.startswith("./articles/") else url
 
                     articles_data.append({
@@ -85,7 +91,7 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
                         '引用元': source
                     })
             except Exception as e:
-                # print(f"Google記事要素 {i} の解析中にエラーが発生しました: {e}")
+                # print(f"Google記事要素 {i} の解析中にエラーが発生しました: {e}") # デバッグ時にコメント解除
                 continue
         return articles_data
     except Exception as e:
@@ -96,13 +102,17 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
             driver.quit()
 
 
-# --- Yahoo!ニュース取得関数 (新規追加) ---
+# --- Yahoo!ニュース取得関数 (新規追加 & セレクタ調整) ---
 def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
     """
     RequestsとBeautifulSoupを使用してYahoo!ニュースから指定されたキーワードのニュース記事を取得します。
     """
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36"} # 最新のUser-Agentを推奨
+    # 最新のUser-Agentを推奨
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    }
     
+    # URLは自動エンコードされるため、直接指定
     url = f"https://news.yahoo.co.jp/search?p={keyword}&ei=utf-8&categories=domestic,world,business,it,science,life,local"
     print(f"アクセスURL (Yahoo!): {url}")
     
@@ -112,61 +122,72 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
         res.raise_for_status() # HTTPエラーが発生した場合に例外を発生させる
         soup = BeautifulSoup(res.text, "html.parser")
 
-        # Yahoo!ニュースのセレクタは頻繁に変わる可能性があるため、注意深く確認
-        # 主に li[data-tn-screen="results-item"] を使用
+        # Yahoo!ニュースのセレクタは頻繁に変わるため、より汎用的なものや複数パターンを試す
+        # 主に `data-tn-screen="results-item"` を持つ `li` 要素
         article_blocks = soup.find_all("li", attrs={"data-tn-screen": "results-item"})
 
         if not article_blocks:
-            # もし上記セレクタで取得できなければ、参考プログラムのセレクタも試す
-            article_blocks = soup.find_all("li", class_=re.compile("sc-1u4589e-0"))
-            if not article_blocks:
-                print("⚠️ Yahoo!ニュース: 記事ブロックが見つかりませんでした。セレクタを確認してください。")
-                return []
+            # もし上記セレクタで取得できなければ、class名の一部パターンも試す（正規表現）
+            article_blocks = soup.find_all("li", class_=re.compile(r"sc-\w{6}-\d+\s+")) # 例: sc-1u4589e-0 のようなクラス名
+
+        if not article_blocks:
+            print("⚠️ Yahoo!ニュース: 記事ブロックが見つかりませんでした。セレクタを確認してください。")
+            return []
 
         print(f"検出された記事要素の数 (Yahoo!): {len(article_blocks)}")
 
         for i, article in enumerate(article_blocks):
-            try:
-                # タイトル: aタグで class="sc-3ls169-0..."
-                title_tag = article.find("a", class_=re.compile("sc-3ls169-0.+"))
-                title = title_tag.text.strip() if title_tag else ""
+            title = ""
+            link = ""
+            date_str = ""
+            formatted_date = ""
+            source_text = "N/A"
 
-                link_tag = article.find("a", href=True)
-                link = link_tag["href"] if link_tag else ""
+            try:
+                # タイトルとリンクは同一のaタグに格納されていることが多い
+                # `data-cl-tab` 属性でタイトルリンクを特定する試み
+                title_link_tag = article.find("a", attrs={"data-cl-tab": "titleLink"})
+                if title_link_tag:
+                    title = title_link_tag.text.strip()
+                    link = title_link_tag["href"]
+                else: # Fallback: 以前のセレクタパターン
+                    title_tag = article.find("a", class_=re.compile("sc-3ls169-0.+"))
+                    if title_tag:
+                        title = title_tag.text.strip()
+                        link = title_tag["href"]
 
                 # 投稿日: timeタグ
                 time_tag = article.find("time")
-                date_str = time_tag.text.strip() if time_tag else ""
-
-                # 投稿日時のフォーマット変更
-                formatted_date = ""
-                if date_str:
-                    date_str = re.sub(r'\([月火水木金土日]\)', '', date_str).strip() # 括弧内の曜日を削除
+                if time_tag:
+                    date_str = time_tag.text.strip()
+                    # 投稿日時のフォーマット変更
+                    date_str_clean = re.sub(r'\([月火水木金土日]\)', '', date_str).strip() # 括弧内の曜日を削除
                     try:
                         # 'YYYY/M/D H:MM' 形式に変換 (%m, %dはゼロ埋めなしにも対応)
-                        dt_obj = datetime.strptime(date_str, "%Y/%m/%d %H:%M")
-                        formatted_date = dt_obj.strftime("%Y/%#m/%#d %H:%M") # Windowsの場合
-                        # その他のOSの場合: formatted_date = dt_obj.strftime("%Y/%-m/%-d %H:%M")
+                        dt_obj = datetime.strptime(date_str_clean, "%Y/%m/%d %H:%M")
+                        formatted_date = dt_obj.strftime("%Y/%#m/%#d %H:%M") # Windows用
+                        # その他のOSの場合: dt_obj.strftime("%Y/%-m/%-d %H:%M")
                     except ValueError:
-                        # 変換できない場合は元の文字列をそのまま使用
-                        formatted_date = date_str
-
-                # ソースの抽出
-                # data-by-text属性を持つdiv、または参考プログラムのセレクタ
-                source_tag = article.find("div", attrs={"data-by-text": True})
-                source_text = source_tag["data-by-text"].strip() if source_tag else "N/A"
+                        formatted_date = date_str_clean # 変換できない場合はクリーニングした文字列をそのまま使用
                 
-                # もし上記で取れなければ、参考プログラムのセレクタも試す
-                if source_text == "N/A" or not source_text:
-                    source_tag_alt = article.find("div", class_="sc-n3vj8g-0") # yoLqH は動的クラス名なので削除
-                    if source_tag_alt:
-                        inner_source_tag_alt = source_tag_alt.find("span", class_=re.compile("sc-110wjhy-8.+")) # bsEjY も動的クラス名なので削除
-                        if inner_source_tag_alt:
-                            source_text = inner_source_tag_alt.text.strip() if inner_source_tag_alt else "N/A"
+                # ソースの抽出
+                # `data-by-text` 属性を持つ要素が最も信頼性が高いことが多い
+                source_tag_data_by_text = article.find("div", attrs={"data-by-text": True})
+                if source_tag_data_by_text:
+                    source_text = source_tag_data_by_text["data-by-text"].strip()
+                else: # Fallback: 以前のセレクタパターン
+                    source_tag_alt1 = article.find("div", class_=re.compile(r"sc-n3vj8g-\d+")) # 動的なクラス名の一部
+                    if source_tag_alt1:
+                        inner_source_tag_alt1 = source_tag_alt1.find("span", class_=re.compile(r"sc-\w{6}-\d+"))
+                        if inner_source_tag_alt1:
+                            source_text = inner_source_tag_alt1.text.strip()
 
+
+                # デバッグ用に取得した値を出力
+                print(f"  記事 {i} - タイトル: '{title}', URL: '{link}', 投稿日(生): '{date_str}', 投稿日(変換後): '{formatted_date}', 引用元: '{source_text}'")
 
                 if not title or not link:
-                    # タイトルかURLが取得できなかった場合はスキップ
+                    print(f"  記事 {i}: タイトルまたはURLが空のためスキップします。")
                     continue
 
                 articles_data.append({
@@ -177,7 +198,7 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
                 })
                 time.sleep(0.3) # 連続アクセスを避けるための遅延
             except Exception as e:
-                # print(f"Yahoo記事要素 {i} の解析中にエラーが発生しました: {e}")
+                print(f"❌ Yahoo記事要素 {i} の解析中にエラーが発生しました: {e}") 
                 continue
         return articles_data
     except requests.exceptions.RequestException as e:
@@ -200,6 +221,7 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
         spreadsheet_id (str): 書き込み先のGoogleスプレッドシートID。
         worksheet_name (str): 書き込み先のワークシート名。
     """
+    # Google Sheets APIの認証情報（環境変数またはcredentials.jsonから取得）
     credentials_json_str = os.environ.get('GCP_SERVICE_ACCOUNT_KEY')
     credentials = None
 
@@ -249,8 +271,8 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
         new_articles_count = 0
 
         # 取得した記事を投稿日でソートする（最新のものが上に来るように降順）
-        # '投稿日'は 'YYYY/MM/DD HH:MM' 形式なので、datetimeオブジェクトに変換してソート
         try:
+            # '投稿日'が 'YYYY/MM/DD HH:MM' 形式であることを前提
             sorted_articles = sorted(
                 articles, 
                 key=lambda x: datetime.strptime(x.get('投稿日', '1900/01/01 00:00'), "%Y/%#m/%#d %H:%M"), 
@@ -302,6 +324,7 @@ if __name__ == "__main__":
     
     # --- Yahoo!ニュースの取得と書き込み ---
     print("\n--- Yahoo!ニュース ---")
+    # Yahoo!ニュースのデバッグ出力のため、一旦変数に格納して結果を確認
     yahoo_news_articles = get_yahoo_news_with_requests(KEYWORD)
     if yahoo_news_articles:
         print(f"✨ Yahoo!ニュースから {len(yahoo_news_articles)}件のニュースを取得しました。")
