@@ -19,17 +19,15 @@ from bs4 import BeautifulSoup
 import gspread
 
 # --- MSNニュース (Selenium + BeautifulSoup) 関連のインポート ---
-# pandasはExcel出力ではなく、データ構造を一時的に作るのに便利ですが、
-# 最終的にスプレッドシートに書くので必須ではありませんが、ここではコードの整合性のため残します。
-# openpyxlはGoogleスプレッドシートに書くため不要なので削除しています。
-import pandas as pd
+import pandas as pd # データ構造を一時的に作るのに使用
 
 
 # 共通設定
 KEYWORD = "日産"
 # IMPORTANT: Replace with your actual Google Spreadsheet ID
 # あなたのGoogleスプレッドシートIDに置き換えてください！
-SPREADSHEET_ID = "YOUR_SPREADSHEET_ID_HERE" 
+# 提供されたIDをここに設定
+SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8" 
 
 
 # --- Googleニュース取得関数 (Selenium) ---
@@ -329,7 +327,8 @@ def get_msn_news(keyword: str) -> list[dict]:
 
             # 指定されたフォーマット "YYYY/M/D H:MM" に整形
             # pub_time_objがNoneの場合、元のpub_labelを使用
-            formatted_date_str = pub_time_obj.strftime("%Y/%m/%d %H:%M") if pub_time_obj else pub_label
+            # %#m, %#d はゼロパディングなしの月日
+            formatted_date_str = pub_time_obj.strftime("%Y/%#m/%#d %H:%M") if pub_time_obj else pub_label
 
             # Debug print statements for each extracted value
             print(f"  Article {i}: Title='{title}', URL='{url}', Date(raw)='{pub_label}', Date(fmt)='{formatted_date_str}', Source='{source}'")
@@ -405,7 +404,8 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
             print(f"ワークシート '{worksheet_name}' を選択しました。")
         except gspread.exceptions.WorksheetNotFound:
             print(f"ワークシート '{worksheet_name}' が見つかりません。新規作成します。")
-            worksheet = sh.add_worksheet(title=worksheet_name, rows="1", cols="4")
+            # ヘッダー行を考慮して初期行数を設定
+            worksheet = sh.add_worksheet(title=worksheet_name, rows="1", cols="4") 
             # ヘッダー行を書き込む
             worksheet.append_row(['タイトル', 'URL', '投稿日', '引用元'])
             print(f"ワークシート '{worksheet_name}' を作成し、ヘッダーを書き込みました。")
@@ -488,7 +488,7 @@ if __name__ == "__main__":
     msn_news_articles = get_msn_news(KEYWORD)
     if msn_news_articles:
         print(f"✨ Retrieved {len(msn_news_articles)} news articles from MSN News.")
-        write_to_spreadsheet(msn_news_articles, SPREADSHEET_ID, "MSN") # Write to a new "MSN" sheet
+        write_to_spreadsheet(msn_news_articles, SPREADSHEET_ID, "MSN") # "MSN"という新しいシートに書き込み
     else:
         print("🤔 Failed to retrieve MSN News.")
     
