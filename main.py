@@ -18,16 +18,8 @@ from bs4 import BeautifulSoup
 # --- gspread関連のインポート ---
 import gspread
 
-# --- MSNニュース (Selenium + BeautifulSoup) 関連のインポート ---
-# pandas は直接Excelに出力しないため、ここでは不要です。
-# import pandas as pd # <-- この行を削除しました
-
-
 # 共通設定
 KEYWORD = "日産"
-# IMPORTANT: Replace with your actual Google Spreadsheet ID
-# あなたのGoogleスプレッドシートIDに置き換えてください！
-# 提供されたIDをここに設定
 SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8" 
 
 
@@ -83,10 +75,8 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
                     utc_dt = datetime.strptime(date_utc_str, "%Y-%m-%dT%H:%M:%SZ")
                     jst_dt = utc_dt + timedelta(hours=9) # Convert to JST
                     
-                    # Format date as "YYYY/M/D HH:MM" (no zero-padding for month/day)
                     formatted_date = f"{jst_dt.year}/{jst_dt.month}/{jst_dt.day} {jst_dt.hour:02}:{jst_dt.minute:02}"
 
-                    # Convert relative URLs to absolute URLs
                     full_url = "https://news.google.com" + url[1:] if url.startswith("./articles/") else url
 
                     articles_data.append({
@@ -96,7 +86,6 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
                         '引用元': source
                     })
             except Exception as e:
-                # Uncomment the line below to see detailed errors in GitHub Actions logs for Google News
                 # print(f"Error parsing Google article element {i}: {e}") 
                 continue
         return articles_data
@@ -126,14 +115,20 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
         res.raise_for_status() 
         soup = BeautifulSoup(res.text, "html.parser")
 
-        # --- Yahoo!ニュースの主要な記事ブロックを見つけるためのセレクタ強化 ---
+        # Yahoo!ニュースの主要な記事ブロックを見つけるためのセレクタ強化
+        # ログから判断するに、いくつかの記事ブロックは検出されているが、その中のタイトル/URLが取れていない模様
         article_blocks = soup.find_all("li", attrs={"data-tn-screen": "results-item"})
-
         if not article_blocks:
             article_blocks = soup.find_all("li", class_="newsFeed_item")
-            
         if not article_blocks:
+            # 新しいYahoo!ニュースのレイアウトで記事コンテナとして使われるクラスを試す
             article_blocks = soup.find_all("div", class_=re.compile(r"sc-\w{6}-\d+\s+"))
+        
+        # さらに汎用的なセレクタも試す
+        if not article_blocks:
+            article_blocks = soup.find_all("div", class_="news-card") # Bing Newsで使うかもしれないがYahooも共通化している可能性
+        if not article_blocks:
+            article_blocks = soup.find_all("li", class_="articleListItem") # 別のタイプのリストアイテム
 
 
         if not article_blocks:
@@ -151,65 +146,84 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
 
             try:
                 # --- タイトルとURLの抽出強化 ---
-                title_link_tag = article.find("a", attrs={"data-cl-tab": "titleLink"})
+                # 最も信頼性の高いセレクタから順に試す
+                # Yahoo!ニュースはaタグ直下にタイトルが来ることが多い
+                title_link_tag = article.find("a", attrs={"data-cl-tab": "titleLink"}) # 特定の属性を持つリンク
+                if not title_link_tag:
+                    title_link_tag = article.find("a", class_="newsFeed_item_link") # 一般的なニュースフィードのリンククラス
+                if not title_link_tag:
+                    title_link_tag = article.find("a", class_="newsArticle_link") # 別のリンククラス
+                if not title_link_tag:
+                    title_link_tag = article.find("a", class_="sc-evrRku bVwJtJ") # スクショなどから見られるクラス
+                if not title_link_tag:
+                    title_link_tag = article.find("a", class_="newslink") # 古いYahoo!ニュースのクラス
+                if not title_link_tag:
+                    title_link_tag = article.find("h2").find("a", href=True) if article.find("h2") else None # h2タグ内のリンク
+                if not title_link_tag:
+                    title_link_tag = article.find("h3").find("a", href=True) if article.find("h3") else None # h3タグ内のリンク
+                if not title_link_tag:
+                    # 記事ブロック内の最初の有効なリンクを試す
+                    first_link = article.find("a", href=True)
+                    if first_link and "news.yahoo.co.jp" in first_link.get("href", ""):
+                        title_link_tag = first_link
+
                 if title_link_tag:
                     title = title_link_tag.text.strip()
                     link = title_link_tag.get("href", "")
-                else:
-                    h_tag = article.find(["h2", "h3"])
-                    if h_tag:
-                        nested_link_tag = h_tag.find("a", href=True)
-                        if nested_link_tag:
-                            title = nested_link_tag.text.strip()
-                            link = nested_link_tag.get("href", "")
                     
-                    if not title and not link:
-                        fallback_link_tag = article.find("a", href=True)
-                        if fallback_link_tag and "news.yahoo.co.jp" in fallback_link_tag.get("href", ""):
-                            if fallback_link_tag.text.strip() and len(fallback_link_tag.text.strip()) > 5:
-                                title = fallback_link_tag.text.strip()
-                                link = fallback_link_tag.get("href", "")
+                    # 広告やPR記事を除外するための追加チェック
+                    if "pr-label" in article.get("class", []) or "sponsored" in link.lower() or "advertisement" in link.lower() or "pr_link" in link.lower():
+                        print(f"  Article {i}: Skipping as it appears to be an ad/PR article.")
+                        continue
 
                 # --- 投稿日の抽出強化 ---
                 time_tag = article.find("time")
                 if time_tag:
                     date_str = time_tag.text.strip()
+                    # (曜日) を削除
                     date_str_clean = re.sub(r'\([月火水木金土日]\)', '', date_str).strip() 
+                    
                     try:
+                        # "YYYY/MM/DD HH:MM" 形式
                         dt_obj = datetime.strptime(date_str_clean, "%Y/%m/%d %H:%M")
                         formatted_date = f"{dt_obj.year}/{dt_obj.month}/{dt_obj.day} {dt_obj.hour:02}:{dt_obj.minute:02}"
                     except ValueError:
-                        current_year = datetime.now().year
                         try:
+                            # "MM/DD HH:MM" 形式 (今年の日付と仮定)
+                            current_year = datetime.now().year
                             dt_obj = datetime.strptime(f"{current_year}/{date_str_clean}", "%Y/%m/%d %H:%M")
                             formatted_date = f"{dt_obj.year}/{dt_obj.month}/{dt_obj.day} {dt_obj.hour:02}:{dt_obj.minute:02}"
                         except ValueError:
-                            formatted_date = date_str_clean 
-                
+                            formatted_date = date_str_clean # 変換できない場合はそのまま使用
+
                 # --- 引用元の抽出強化 ---
+                source_text = "N/A"
                 source_tag_data_by_text = article.find("div", attrs={"data-by-text": True})
                 if source_tag_data_by_text:
                     source_text = source_tag_data_by_text["data-by-text"].strip()
                 else: 
-                    source_span = article.find("span", class_=re.compile(r"sc-\w{6}-\d+"))
+                    # いくつかの一般的なソースタグのクラスを試す
+                    source_span = article.find("span", class_=re.compile(r"sc-\w{6}-\d+")) # 動的に変わるクラス
+                    if not source_span:
+                        source_span = article.find("span", class_="newsFeed_item_media") # 別の一般的なソースクラス
+                    if not source_span:
+                        source_span = article.find("span", class_="articleListItem_media") # 別のリストアイテムソースクラス
                     if source_span:
                         source_text = source_span.text.strip()
                     else:
-                        small_text_elements = article.find_all(lambda tag: tag.name in ['div', 'span', 'p', 'time'] and 'text-xs' in tag.get('class', []))
+                        # 最後の手段として、小さいテキスト要素から探す（ただし誤検知の可能性あり）
+                        small_text_elements = article.find_all(lambda tag: tag.name in ['div', 'span', 'p'] and 'text-xs' in tag.get('class', []) or 'text-sm' in tag.get('class', []) or 'media' in tag.get('class', []))
                         for elem in small_text_elements:
                             text = elem.text.strip()
-                            if '記事' not in text and 'PR' not in text and '提供' not in text and len(text) < 30 and not re.match(r'\d{1,2}/\d{1,2}\(\w\)\s\d{1,2}:\d{2}', text):
+                            if '記事' not in text and 'PR' not in text and '提供' not in text and len(text) > 2 and len(text) < 50 and not re.match(r'\d{1,2}/\d{1,2}\(\w\)\s\d{1,2}:\d{2}', text) and not re.match(r'\d+時間前', text) and not re.match(r'\d+分前', text): # 日付や時間でないことを確認
                                 source_text = text
                                 break
+
 
                 print(f"  Article {i}: Title='{title}', URL='{link}', Date(raw)='{date_str}', Date(fmt)='{formatted_date}', Source='{source_text}'")
 
                 if not title or not link:
                     print(f"  Article {i}: Skipping as title or URL is empty.")
-                    continue
-
-                if "pr-label" in article.get("class", []) or "sponsored" in link.lower() or "advertisement" in link.lower():
-                    print(f"  Article {i}: Skipping as it appears to be an ad/PR article.")
                     continue
 
 
@@ -253,7 +267,6 @@ def get_msn_news(keyword: str) -> list[dict]:
         print(f"Error: Failed to launch MSN ChromeDriver. {e}")
         return []
 
-    # ✅ 現在時刻（日本時間）- スクラブ時に動的に取得
     now_jst = datetime.utcnow() + timedelta(hours=9)
 
     search_url = f'https://www.bing.com/news/search?q={keyword}&qft=sortbydate%3d"1"&form=YFNR'
@@ -262,10 +275,8 @@ def get_msn_news(keyword: str) -> list[dict]:
     articles_data = []
     try:
         driver.get(search_url)
-        time.sleep(5) # ページ読み込みを待つ
+        time.sleep(5)
 
-        # ページの最下部までスクロールして、より多くの記事を読み込む
-        # MSNの場合、無限スクロールがある可能性を考慮して複数回実行
         for _ in range(3):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
@@ -273,24 +284,21 @@ def get_msn_news(keyword: str) -> list[dict]:
         html = driver.page_source
         soup = BeautifulSoup(html, "html.parser")
 
-        # ✅ 各ニュース記事の情報を取得
-        # `div.news-card` が個々の記事ブロックに対応すると仮定
         news_cards = soup.select('div.news-card')
         print(f"Number of article elements detected (MSN): {len(news_cards)}")
 
         for i, card in enumerate(news_cards):
             title = card.get("data-title", "").strip()
             url = card.get("data-url", "").strip()
-            source = card.get("data-author", "").strip() # data-author を引用元として使用
+            source = card.get("data-author", "").strip() 
 
-            pub_time_obj = None # datetimeオブジェクトとして日付を保持
-            pub_label = "" # 元のaria-labelの内容を保持
+            pub_time_obj = None
+            pub_label = ""
 
             pub_tag = card.find("span", attrs={"aria-label": True})
             if pub_tag and pub_tag.has_attr("aria-label"):
                 pub_label = pub_tag["aria-label"].strip()
 
-            # 🔽 相対時刻を絶対日時に変換し、指定フォーマットに整形
             if "分前" in pub_label:
                 minutes_match = re.search(r"(\d+)", pub_label)
                 if minutes_match:
@@ -307,31 +315,23 @@ def get_msn_news(keyword: str) -> list[dict]:
                     days = int(days_match.group(1))
                     pub_time_obj = now_jst - timedelta(days=days)
             else:
-                # 相対時間ではない場合（例: "5月28日" や "2024/05/28" など）
                 try:
-                    # "月日"形式を想定（例: "5月28日"）
                     if re.match(r'\d+月\d+日', pub_label):
                         current_year = now_jst.year
                         date_str_with_year = f"{current_year}年{pub_label}"
                         pub_time_obj = datetime.strptime(date_str_with_year, "%Y年%m月%d日")
-                    # "YYYY/M/D"形式などを想定
                     elif re.match(r'\d{4}/\d{1,2}/\d{1,2}', pub_label):
                         pub_time_obj = datetime.strptime(pub_label, "%Y/%m/%d")
-                    # "HH:MM" (当日) など、MSNがどう表示するかによる
                     elif re.match(r'\d{1,2}:\d{2}', pub_label): 
                         time_part = datetime.strptime(pub_label, "%H:%M").time()
                         pub_time_obj = datetime.combine(now_jst.date(), time_part)
                     else:
-                        pub_time_obj = None # 解析できない場合はNone
+                        pub_time_obj = None
                 except ValueError:
                     pub_time_obj = None
 
-            # 指定されたフォーマット "YYYY/M/D H:MM" に整形
-            # pub_time_objがNoneの場合、元のpub_labelを使用
-            # %#m, %#d はゼロパディングなしの月日
             formatted_date_str = pub_time_obj.strftime("%Y/%#m/%#d %H:%M") if pub_time_obj else pub_label
 
-            # Debug print statements for each extracted value
             print(f"  Article {i}: Title='{title}', URL='{url}', Date(raw)='{pub_label}', Date(fmt)='{formatted_date_str}', Source='{source}'")
 
             if title and url:
