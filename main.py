@@ -10,7 +10,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
-import requests
 import gspread
 
 KEYWORD = "日産"
@@ -50,7 +49,7 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
                 date_str = re.sub(r'\([月火水木金土日]\)', '', date_str).strip()
                 try:
                     dt_obj = datetime.strptime(date_str, "%Y/%m/%d %H:%M")
-                    formatted_date = dt_obj.strftime("%Y/%m/%d %H:%M")
+                    formatted_date = dt_obj.strftime("%-m/%-d %H:%M")
                 except:
                     formatted_date = date_str
 
@@ -59,7 +58,17 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
             if source_tag:
                 inner = source_tag.find("div", class_="sc-110wjhy-8 bsEjY")
                 if inner and inner.span:
-                    source_text = inner.span.text.strip()
+                    candidate = inner.span.text.strip()
+                    if not candidate.isdigit():
+                        source_text = candidate
+
+            if not source_text or source_text.isdigit():
+                alt_spans = article.find_all(["span", "div"], string=True)
+                for s in alt_spans:
+                    text = s.text.strip()
+                    if 2 <= len(text) <= 20 and not text.isdigit() and re.search(r'[ぁ-んァ-ン一-龥A-Za-z]', text):
+                        source_text = text
+                        break
 
             if title and url:
                 articles_data.append({
@@ -105,7 +114,7 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
             href = a_tag.get("href")
             url = "https://news.google.com" + href[1:] if href.startswith("./") else href
             dt = datetime.strptime(time_tag.get("datetime"), "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=9)
-            pub_date = dt.strftime("%Y/%m/%d %H:%M")
+            pub_date = dt.strftime("%-m/%-d %H:%M")
             source = source_tag.text.strip() if source_tag else "N/A"
             data.append({"タイトル": title, "URL": url, "投稿日": pub_date, "引用元": source})
         except:
@@ -151,7 +160,7 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
                 dt -= timedelta(hours=int(re.search(r"\d+", date_str)[0]))
             elif "日前" in date_str:
                 dt -= timedelta(days=int(re.search(r"\d+", date_str)[0]))
-            pub_date = dt.strftime("%Y/%m/%d %H:%M")
+            pub_date = dt.strftime("%-m/%-d %H:%M")
 
             if title and url:
                 data.append({"タイトル": title, "URL": url, "投稿日": pub_date, "引用元": source})
