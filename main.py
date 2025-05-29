@@ -20,10 +20,11 @@ import gspread
 
 # 共通設定
 KEYWORD = "日産"
-SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8" # ご自身のスプレッドシートID
+# ご自身のスプレッドシートIDに置き換えてください
+SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8" 
 
 
-# --- Googleニュース取得関数 (既存) ---
+# --- Googleニュース取得関数 (Selenium) ---
 def get_google_news_with_selenium(keyword: str) -> list[dict]:
     """
     Seleniumを使用してGoogleニュースから指定されたキーワードのニュース記事を取得します。
@@ -33,7 +34,7 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080") # ウィンドウサイズを設定（headlessで要素が見つからない場合などに有効）
+    options.add_argument("--window-size=1920,1080") 
 
     driver = None
     try:
@@ -52,18 +53,15 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
         driver.get(url)
         time.sleep(5)
 
-        # ページを複数回スクロールして動的なコンテンツの読み込みを促す
         for _ in range(3):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
 
-        # 'article' タグでニュース記事の要素を全て取得 (セレクタは動作確認済み)
         articles = driver.find_elements(By.TAG_NAME, "article")
         print(f"検出された記事要素の数 (Google): {len(articles)}")
 
         for i, article_elem in enumerate(articles):
             try:
-                # 各要素からタイトル、URL、投稿日、引用元を抽出
                 title_tag = article_elem.find_element(By.CSS_SELECTOR, "a.JtKRv")
                 date_tag = article_elem.find_element(By.CSS_SELECTOR, "time.hvbAAd")
                 source_tag = article_elem.find_element(By.CSS_SELECTOR, "div.vr1PYe")
@@ -78,10 +76,9 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
                     jst_dt = utc_dt + timedelta(hours=9)
                     # Windowsの場合のゼロ埋めなしフォーマット (Python 3.6+ のみ)
                     formatted_date = jst_dt.strftime("%Y/%#m/%#d %H:%M") 
-                    # その他のOS (Linux/macOS) の場合: formatted_date = jst_dt.strftime("%Y/%-m/%-d %H:%M")
-                    # 両対応させるなら f-string と .lstrip('0') を使う方法も考慮
+                    # その他のOS (Linux/macOS) の場合、%m, %d でゼロ埋めされるため、必要に応じて .lstrip('0') を適用
+                    # 例: formatted_date = f"{jst_dt.year}/{jst_dt.month}/{jst_dt.day} {jst_dt.hour:02}:{jst_dt.minute:02}"
 
-                    # 相対URLを絶対URLに変換
                     full_url = "https://news.google.com" + url[1:] if url.startswith("./articles/") else url
 
                     articles_data.append({
@@ -91,7 +88,8 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
                         '引用元': source
                     })
             except Exception as e:
-                # print(f"Google記事要素 {i} の解析中にエラーが発生しました: {e}") # デバッグ時にコメント解除
+                # GitHub Actionsのログに詳細を出力したい場合はコメント解除
+                # print(f"Google記事要素 {i} の解析中にエラーが発生しました: {e}") 
                 continue
         return articles_data
     except Exception as e:
@@ -102,33 +100,29 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
             driver.quit()
 
 
-# --- Yahoo!ニュース取得関数 (新規追加 & セレクタ調整) ---
+# --- Yahoo!ニュース取得関数 (Requests + BeautifulSoup) ---
 def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
     """
     RequestsとBeautifulSoupを使用してYahoo!ニュースから指定されたキーワードのニュース記事を取得します。
     """
-    # 最新のUser-Agentを推奨
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     }
     
-    # URLは自動エンコードされるため、直接指定
     url = f"https://news.yahoo.co.jp/search?p={keyword}&ei=utf-8&categories=domestic,world,business,it,science,life,local"
     print(f"アクセスURL (Yahoo!): {url}")
     
     articles_data = []
     try:
-        res = requests.get(url, headers=headers, timeout=10) # タイムアウト設定を追加
-        res.raise_for_status() # HTTPエラーが発生した場合に例外を発生させる
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status() 
         soup = BeautifulSoup(res.text, "html.parser")
 
         # Yahoo!ニュースのセレクタは頻繁に変わるため、より汎用的なものや複数パターンを試す
-        # 主に `data-tn-screen="results-item"` を持つ `li` 要素
         article_blocks = soup.find_all("li", attrs={"data-tn-screen": "results-item"})
 
         if not article_blocks:
-            # もし上記セレクタで取得できなければ、class名の一部パターンも試す（正規表現）
-            article_blocks = soup.find_all("li", class_=re.compile(r"sc-\w{6}-\d+\s+")) # 例: sc-1u4589e-0 のようなクラス名
+            article_blocks = soup.find_all("li", class_=re.compile(r"sc-\w{6}-\d+\s+")) 
 
         if not article_blocks:
             print("⚠️ Yahoo!ニュース: 記事ブロックが見つかりませんでした。セレクタを確認してください。")
@@ -145,13 +139,13 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
 
             try:
                 # タイトルとリンクは同一のaタグに格納されていることが多い
-                # `data-cl-tab` 属性でタイトルリンクを特定する試み
                 title_link_tag = article.find("a", attrs={"data-cl-tab": "titleLink"})
                 if title_link_tag:
                     title = title_link_tag.text.strip()
                     link = title_link_tag["href"]
-                else: # Fallback: 以前のセレクタパターン
-                    title_tag = article.find("a", class_=re.compile("sc-3ls169-0.+"))
+                else: 
+                    # フォールバック: 以前のセレクタパターン (クラス名が動的なため正規表現)
+                    title_tag = article.find("a", class_=re.compile(r"sc-\w{6}-\d+")) # 例: sc-3ls169-0aのようなクラス名
                     if title_tag:
                         title = title_tag.text.strip()
                         link = title_tag["href"]
@@ -160,31 +154,29 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
                 time_tag = article.find("time")
                 if time_tag:
                     date_str = time_tag.text.strip()
-                    # 投稿日時のフォーマット変更
-                    date_str_clean = re.sub(r'\([月火水木金土日]\)', '', date_str).strip() # 括弧内の曜日を削除
+                    date_str_clean = re.sub(r'\([月火水木金土日]\)', '', date_str).strip() 
                     try:
-                        # 'YYYY/M/D H:MM' 形式に変換 (%m, %dはゼロ埋めなしにも対応)
                         dt_obj = datetime.strptime(date_str_clean, "%Y/%m/%d %H:%M")
-                        formatted_date = dt_obj.strftime("%Y/%#m/%#d %H:%M") # Windows用
-                        # その他のOSの場合: dt_obj.strftime("%Y/%-m/%-d %H:%M")
+                        # GitHub Actions (Linux) と Windows で %-m, %#m の挙動が異なる可能性を考慮し、
+                        # より汎用的なf-string形式を推奨（必要に応じて）
+                        formatted_date = f"{dt_obj.year}/{dt_obj.month}/{dt_obj.day} {dt_obj.hour:02}:{dt_obj.minute:02}"
                     except ValueError:
-                        formatted_date = date_str_clean # 変換できない場合はクリーニングした文字列をそのまま使用
+                        formatted_date = date_str_clean 
                 
-                # ソースの抽出
-                # `data-by-text` 属性を持つ要素が最も信頼性が高いことが多い
+                # 引用元: `data-by-text` 属性を持つ要素が最も信頼性が高い
                 source_tag_data_by_text = article.find("div", attrs={"data-by-text": True})
                 if source_tag_data_by_text:
                     source_text = source_tag_data_by_text["data-by-text"].strip()
-                else: # Fallback: 以前のセレクタパターン
-                    source_tag_alt1 = article.find("div", class_=re.compile(r"sc-n3vj8g-\d+")) # 動的なクラス名の一部
+                else: 
+                    # フォールバック: 以前のセレクタパターン (クラス名が動的なため正規表現)
+                    source_tag_alt1 = article.find("div", class_=re.compile(r"sc-\w{6}-\d+")) 
                     if source_tag_alt1:
                         inner_source_tag_alt1 = source_tag_alt1.find("span", class_=re.compile(r"sc-\w{6}-\d+"))
                         if inner_source_tag_alt1:
                             source_text = inner_source_tag_alt1.text.strip()
 
-
-                # デバッグ用に取得した値を出力
-                print(f"  記事 {i} - タイトル: '{title}', URL: '{link}', 投稿日(生): '{date_str}', 投稿日(変換後): '{formatted_date}', 引用元: '{source_text}'")
+                # デバッグ用に取得した値を出力 (GitHub Actionsのログで確認)
+                print(f"  記事 {i}: Title='{title}', URL='{link}', Date(raw)='{date_str}', Date(fmt)='{formatted_date}', Source='{source_text}'")
 
                 if not title or not link:
                     print(f"  記事 {i}: タイトルまたはURLが空のためスキップします。")
@@ -196,7 +188,7 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
                     '投稿日': formatted_date,
                     '引用元': source_text
                 })
-                time.sleep(0.3) # 連続アクセスを避けるための遅延
+                time.sleep(0.3) 
             except Exception as e:
                 print(f"❌ Yahoo記事要素 {i} の解析中にエラーが発生しました: {e}") 
                 continue
@@ -209,7 +201,7 @@ def get_yahoo_news_with_requests(keyword: str) -> list[dict]:
         return []
 
 
-# --- スプレッドシート書き込み関数 (既存 + ソートロジック強化) ---
+# --- スプレッドシート書き込み関数 ---
 def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_name: str):
     """
     取得したニュース記事データをGoogleスプレッドシートに書き込みます。
@@ -221,115 +213,26 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
         spreadsheet_id (str): 書き込み先のGoogleスプレッドシートID。
         worksheet_name (str): 書き込み先のワークシート名。
     """
-    # Google Sheets APIの認証情報（環境変数またはcredentials.jsonから取得）
     credentials_json_str = os.environ.get('GCP_SERVICE_ACCOUNT_KEY')
     credentials = None
 
-    if not credentials_json_str:
-        print("GCP_SERVICE_ACCOUNT_KEY 環境変数が設定されていません。")
-        print("ローカルデバッグの場合、credentials.json ファイルを直接読み込むか、環境変数に設定してください。")
-        try:
-            with open('credentials.json', 'r') as f:
-                credentials = json.load(f)
-            print("credentials.json から認証情報を読み込みました。")
-        except Exception as e: 
-            print(f"エラー: credentials.json の読み込みに失敗しました。{e}")
-            return
-    else:
+    # GitHub Actions環境ではGCP_SERVICE_ACCOUNT_KEYが存在することを前提
+    # ローカルデバッグの場合のみ credentials.json を試みる
+    if credentials_json_str:
         try:
             credentials = json.loads(credentials_json_str)
             print("GCP_SERVICE_ACCOUNT_KEY 環境変数から認証情報を読み込みました。")
         except json.JSONDecodeError as e:
             print(f"エラー: GCP_SERVICE_ACCOUNT_KEY 環境変数のJSON形式が不正です。{e}")
             return
-    
-    if not credentials:
-        print("認証情報を取得できませんでした。スプレッドシートへの書き込みをスキップします。")
-        return
-
-    try:
-        gc = gspread.service_account_from_dict(credentials)
-        print("Google Sheets API 認証に成功しました。")
-        
-        sh = gc.open_by_key(spreadsheet_id)
-        print(f"スプレッドシート '{spreadsheet_id}' を開きました。")
-        
-        worksheet = sh.worksheet(worksheet_name)
-        print(f"ワークシート '{worksheet_name}' を選択しました。")
-        
-        existing_data = worksheet.get_all_values()
-        
-        existing_urls = set()
-        if len(existing_data) > 1:
-            for row in existing_data[1:]:
-                if len(row) > 1: 
-                    existing_urls.add(row[1]) 
-        
-        print(f"既存のワークシート'{worksheet_name}'には {len(existing_urls)} 件のユニークなURLがあります。")
-
-        data_to_append = []
-        new_articles_count = 0
-
-        # 取得した記事を投稿日でソートする（最新のものが上に来るように降順）
+    else:
+        # ローカル環境で環境変数が設定されていない場合のみ credentials.json を試す
         try:
-            # '投稿日'が 'YYYY/MM/DD HH:MM' 形式であることを前提
-            sorted_articles = sorted(
-                articles, 
-                key=lambda x: datetime.strptime(x.get('投稿日', '1900/01/01 00:00'), "%Y/%#m/%#d %H:%M"), 
-                reverse=True
-            )
-        except Exception as e:
-            print(f"警告: 日付フォーマットエラーのため、ソートが正しく行われない可能性があります: {e}")
-            sorted_articles = articles # エラー時はソートしない
-
-        for article in sorted_articles:
-            if article.get('URL') and article.get('URL') not in existing_urls:
-                data_to_append.append([
-                    article.get('タイトル', ''),
-                    article.get('URL', ''),
-                    article.get('投稿日', ''),
-                    article.get('引用元', '')
-                ])
-                new_articles_count += 1
-                existing_urls.add(article.get('URL'))
-            
-        if data_to_append:
-            worksheet.append_rows(data_to_append, value_input_option='USER_ENTERED')
-            print(f"✅ {new_articles_count}件の新しいニュースデータをワークシート'{worksheet_name}'に追記しました。")
-        else:
-            print(f"⚠️ ワークシート'{worksheet_name}'に新しいニュースデータはありませんでした。")
-            
-    except gspread.exceptions.SpreadsheetNotFound:
-        print(f"⚠️ スプレッドシート '{spreadsheet_id}' が見つかりません。IDを確認してください。")
-        print("サービスアカウントにスプレッドシートへのアクセス権限が付与されていることを確認してください。")
-    except gspread.exceptions.APIError as e:
-        print(f"❌ Google Sheets API エラーが発生しました: {e}")
-        print(f"APIエラー詳細: {e.response.text if hasattr(e, 'response') else '詳細不明'}")
-        print("サービスアカウントの権限、またはスプレッドシートの共有設定を確認してください。")
-    except Exception as e:
-        print(f"❌ スプレッドシートへの書き込み中に予期せぬエラーが発生しました: {e}")
-
-
-if __name__ == "__main__":
-    print("🚀 ニュース取得を開始します...")
-    
-    # --- Googleニュースの取得と書き込み ---
-    print("\n--- Googleニュース ---")
-    google_news_articles = get_google_news_with_selenium(KEYWORD) 
-    if google_news_articles:
-        print(f"✨ Googleニュースから {len(google_news_articles)}件のニュースを取得しました。")
-        write_to_spreadsheet(google_news_articles, SPREADSHEET_ID, "Google") # "Google"シートに書き込む
-    else:
-        print("🤔 Googleニュースが取得できませんでした。")
-    
-    # --- Yahoo!ニュースの取得と書き込み ---
-    print("\n--- Yahoo!ニュース ---")
-    # Yahoo!ニュースのデバッグ出力のため、一旦変数に格納して結果を確認
-    yahoo_news_articles = get_yahoo_news_with_requests(KEYWORD)
-    if yahoo_news_articles:
-        print(f"✨ Yahoo!ニュースから {len(yahoo_news_articles)}件のニュースを取得しました。")
-        write_to_spreadsheet(yahoo_news_articles, SPREADSHEET_ID, "Yahoo") # "Yahoo"シートに書き込む
-    else:
-        print("🤔 Yahoo!ニュースが取得できませんでした。")
-    
-    print("\n✅ 全ニュース取得・書き込み完了")
+            with open('credentials.json', 'r') as f:
+                credentials = json.load(f)
+            print("credentials.json から認証情報を読み込みました。（ローカル実行時）")
+        except FileNotFoundError:
+            print("❌ エラー: GCP_SERVICE_ACCOUNT_KEY 環境変数が設定されておらず、credentials.json も見つかりません。")
+            print("GitHub Actionsで実行していることを確認するか、ローカル実行の場合は credentials.json を配置してください。")
+            return
+        except json.JSONDecodeError as e
