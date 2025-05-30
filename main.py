@@ -7,23 +7,22 @@ from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import gspread
 
-# ✅ 設定項目
 KEYWORD = "日産"
 SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8"
 
-# ✅ Googleニュース
+def format_datetime(dt_obj):
+    """YYYY/MM/DD HH:MM形式に統一"""
+    return dt_obj.strftime("%Y/%m/%d %H:%M")
+
 def get_google_news_with_selenium(keyword: str) -> list[dict]:
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     url = f"https://news.google.com/search?q={keyword}&hl=ja&gl=JP&ceid=JP:ja"
     driver.get(url)
@@ -46,7 +45,7 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
             href = a_tag.get("href")
             url = "https://news.google.com" + href[1:] if href.startswith("./") else href
             dt = datetime.strptime(time_tag.get("datetime"), "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=9)
-            pub_date = dt.strftime("%Y/%-m/%-d %H:%M")
+            pub_date = format_datetime(dt)
             source = source_tag.text.strip() if source_tag else "N/A"
             data.append({"タイトル": title, "URL": url, "投稿日": pub_date, "引用元": source})
         except:
@@ -54,13 +53,11 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
     print(f"✅ Googleニュース件数: {len(data)} 件")
     return data
 
-# ✅ Yahooニュース
 def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     search_url = f"https://news.yahoo.co.jp/search?p={keyword}&ei=utf-8&categories=domestic,world,business,it,science,life,local"
     driver.get(search_url)
@@ -77,7 +74,6 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
             title = title_tag.text.strip() if title_tag else ""
             link_tag = article.find("a", href=True)
             url = link_tag["href"] if link_tag else ""
-
             time_tag = article.find("time")
             date_str = time_tag.text.strip() if time_tag else ""
             formatted_date = ""
@@ -85,7 +81,7 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
                 date_str = re.sub(r'\([月火水木金土日]\)', '', date_str).strip()
                 try:
                     dt_obj = datetime.strptime(date_str, "%Y/%m/%d %H:%M")
-                    formatted_date = dt_obj.strftime("%Y/%-m/%-d %H:%M")
+                    formatted_date = format_datetime(dt_obj)
                 except:
                     formatted_date = date_str
 
@@ -97,7 +93,6 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
                     candidate = inner.span.text.strip()
                     if not candidate.isdigit():
                         source_text = candidate
-
             if not source_text or source_text.isdigit():
                 alt_spans = article.find_all(["span", "div"], string=True)
                 for s in alt_spans:
@@ -119,14 +114,12 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
     print(f"✅ Yahoo!ニュース件数: {len(articles_data)} 件")
     return articles_data
 
-# ✅ MSNニュース（修正済み）
 def get_msn_news_with_selenium(keyword: str) -> list[dict]:
     now = datetime.utcnow() + timedelta(hours=9)
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     url = f"https://www.bing.com/news/search?q={keyword}&qft=sortbydate%3d'1'&form=YFNR"
     driver.get(url)
@@ -169,7 +162,7 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
                     pub_time_obj = datetime.combine(now.date(), t)
                 except: pass
 
-            pub_date = pub_time_obj.strftime("%Y/%-m/%-d %H:%M") if pub_time_obj else pub_label
+            pub_date = format_datetime(pub_time_obj) if pub_time_obj else pub_label
 
             if title and url:
                 data.append({
@@ -184,7 +177,6 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
     print(f"✅ MSNニュース件数: {len(data)} 件")
     return data
 
-# ✅ Googleスプレッドシート出力
 def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_name: str):
     credentials_json_str = os.environ.get('GCP_SERVICE_ACCOUNT_KEY')
     credentials = json.loads(credentials_json_str) if credentials_json_str else json.load(open('credentials.json'))
@@ -207,7 +199,6 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
     else:
         print("⚠️ 追記すべき新しいデータはありません。")
 
-# ✅ 実行部
 if __name__ == "__main__":
     print("\n--- Google News ---")
     google_news_articles = get_google_news_with_selenium(KEYWORD)
