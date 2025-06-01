@@ -115,7 +115,7 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
     return articles_data
 
 def get_msn_news_with_selenium(keyword: str) -> list[dict]:
-    now = datetime.utcnow() + timedelta(hours=9)
+    now = datetime.utcnow() + timedelta(hours=9)  # JST基準
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
@@ -139,28 +139,39 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
             pub_label = ""
             pub_tag = card.find("span", attrs={"aria-label": True})
             if pub_tag and pub_tag.has_attr("aria-label"):
-                pub_label = pub_tag["aria-label"].strip()
+                pub_label = pub_tag["aria-label"].strip().lower()
 
-            if "分前" in pub_label:
+            # 英語・日本語の時間表記に対応
+            if "分前" in pub_label or "minutes ago" in pub_label:
                 m = re.search(r"(\d+)", pub_label)
-                if m: pub_time_obj = now - timedelta(minutes=int(m.group(1)))
-            elif "時間前" in pub_label:
+                if m:
+                    pub_time_obj = now - timedelta(minutes=int(m.group(1)))
+            elif "時間前" in pub_label or "hours ago" in pub_label:
                 h = re.search(r"(\d+)", pub_label)
-                if h: pub_time_obj = now - timedelta(hours=int(h.group(1)))
-            elif "日前" in pub_label:
+                if h:
+                    pub_time_obj = now - timedelta(hours=int(h.group(1)))
+            elif "日前" in pub_label or "days ago" in pub_label:
                 d = re.search(r"(\d+)", pub_label)
-                if d: pub_time_obj = now - timedelta(days=int(d.group(1)))
+                if d:
+                    pub_time_obj = now - timedelta(days=int(d.group(1)))
             elif re.match(r'\d+月\d+日', pub_label):
-                try: pub_time_obj = datetime.strptime(f"{now.year}年{pub_label}", "%Y年%m月%d日")
-                except: pass
+                try:
+                    pub_time_obj = datetime.strptime(f"{now.year}年{pub_label}", "%Y年%m月%d日")
+                except:
+                    pass
             elif re.match(r'\d{4}/\d{1,2}/\d{1,2}', pub_label):
-                try: pub_time_obj = datetime.strptime(pub_label, "%Y/%m/%d")
-                except: pass
+                try:
+                    pub_time_obj = datetime.strptime(pub_label, "%Y/%m/%d")
+                except:
+                    pass
             elif re.match(r'\d{1,2}:\d{2}', pub_label):
                 try:
                     t = datetime.strptime(pub_label, "%H:%M").time()
                     pub_time_obj = datetime.combine(now.date(), t)
-                except: pass
+                    if pub_time_obj > now:
+                        pub_time_obj -= timedelta(days=1)
+                except:
+                    pass
 
             pub_date = format_datetime(pub_time_obj) if pub_time_obj else pub_label
 
