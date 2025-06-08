@@ -2,8 +2,10 @@ import os
 import json
 import time
 import re
-from datetime import datetime, timedelta
 import random
+import requests
+from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -17,6 +19,17 @@ SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8"
 
 def format_datetime(dt_obj):
     return dt_obj.strftime("%Y/%m/%d %H:%M")
+
+def get_last_modified_datetime(url):
+    try:
+        response = requests.head(url, timeout=5)
+        if 'Last-Modified' in response.headers:
+            dt = parsedate_to_datetime(response.headers['Last-Modified'])
+            jst = dt.astimezone(tz=timedelta(hours=9))
+            return format_datetime(jst)
+    except:
+        pass
+    return "取得不可"
 
 def get_google_news_with_selenium(keyword: str) -> list[dict]:
     options = Options()
@@ -105,7 +118,7 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
                 articles_data.append({
                     "タイトル": title,
                     "URL": url,
-                    "投稿日": formatted_date,
+                    "投稿日": formatted_date if formatted_date else "取得不可",
                     "引用元": source_text
                 })
         except:
@@ -137,6 +150,8 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
             source = card.get("data-author", "").strip()
             pub_time_obj = None
             pub_label = ""
+            pub_date = ""
+
             pub_tag = card.find("span", attrs={"aria-label": True})
             if pub_tag and pub_tag.has_attr("aria-label"):
                 pub_label = pub_tag["aria-label"].strip().lower()
@@ -172,16 +187,24 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
                 except:
                     pass
 
-            pub_date = format_datetime(pub_time_obj) if pub_time_obj else pub_label
+            if pub_time_obj:
+                pub_date = format_datetime(pub_time_obj)
+            elif pub_label:
+                pub_date = pub_label
+            elif url:
+                pub_date = get_last_modified_datetime(url)
+            else:
+                pub_date = "取得不可"
 
             if title and url:
                 data.append({
                     "タイトル": title,
                     "URL": url,
                     "投稿日": pub_date,
-                    "引用元": source
+                    "引用元": source if source else "MSN"
                 })
-        except:
+        except Exception as e:
+            print(f"⚠️ MSN記事処理エラー: {e}")
             continue
 
     print(f"✅ MSNニュース件数: {len(data)} 件")
