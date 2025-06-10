@@ -20,6 +20,40 @@ SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8"
 def format_datetime(dt_obj):
     return dt_obj.strftime("%Y/%m/%d %H:%M")
 
+def parse_relative_time(pub_label: str, base_time: datetime) -> str:
+    pub_label = pub_label.strip().lower()
+    try:
+        if "分前" in pub_label or "minute" in pub_label:
+            m = re.search(r"(\d+)", pub_label)
+            if m:
+                dt = base_time - timedelta(minutes=int(m.group(1)))
+                return format_datetime(dt)
+        elif "時間前" in pub_label or "hour" in pub_label:
+            h = re.search(r"(\d+)", pub_label)
+            if h:
+                dt = base_time - timedelta(hours=int(h.group(1)))
+                return format_datetime(dt)
+        elif "日前" in pub_label or "day" in pub_label:
+            d = re.search(r"(\d+)", pub_label)
+            if d:
+                dt = base_time - timedelta(days=int(d.group(1)))
+                return format_datetime(dt)
+        elif re.match(r'\d+月\d+日', pub_label):
+            dt = datetime.strptime(f"{base_time.year}年{pub_label}", "%Y年%m月%d日")
+            return format_datetime(dt)
+        elif re.match(r'\d{4}/\d{1,2}/\d{1,2}', pub_label):
+            dt = datetime.strptime(pub_label, "%Y/%m/%d")
+            return format_datetime(dt)
+        elif re.match(r'\d{1,2}:\d{2}', pub_label):
+            t = datetime.strptime(pub_label, "%H:%M").time()
+            dt = datetime.combine(base_time.date(), t)
+            if dt > base_time:
+                dt -= timedelta(days=1)
+            return format_datetime(dt)
+    except:
+        pass
+    return "取得不可"
+
 def get_last_modified_datetime(url):
     try:
         response = requests.head(url, timeout=5)
@@ -148,7 +182,6 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
             title = card.get("data-title", "").strip()
             url = card.get("data-url", "").strip()
             source = card.get("data-author", "").strip()
-            pub_time_obj = None
             pub_label = ""
             pub_date = ""
 
@@ -156,45 +189,10 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
             if pub_tag and pub_tag.has_attr("aria-label"):
                 pub_label = pub_tag["aria-label"].strip().lower()
 
-            if "分前" in pub_label or "minutes ago" in pub_label:
-                m = re.search(r"(\d+)", pub_label)
-                if m:
-                    pub_time_obj = now - timedelta(minutes=int(m.group(1)))
-            elif "時間前" in pub_label or "hours ago" in pub_label:
-                h = re.search(r"(\d+)", pub_label)
-                if h:
-                    pub_time_obj = now - timedelta(hours=int(h.group(1)))
-            elif "日前" in pub_label or "days ago" in pub_label:
-                d = re.search(r"(\d+)", pub_label)
-                if d:
-                    pub_time_obj = now - timedelta(days=int(d.group(1)))
-            elif re.match(r'\d+月\d+日', pub_label):
-                try:
-                    pub_time_obj = datetime.strptime(f"{now.year}年{pub_label}", "%Y年%m月%d日")
-                except:
-                    pass
-            elif re.match(r'\d{4}/\d{1,2}/\d{1,2}', pub_label):
-                try:
-                    pub_time_obj = datetime.strptime(pub_label, "%Y/%m/%d")
-                except:
-                    pass
-            elif re.match(r'\d{1,2}:\d{2}', pub_label):
-                try:
-                    t = datetime.strptime(pub_label, "%H:%M").time()
-                    pub_time_obj = datetime.combine(now.date(), t)
-                    if pub_time_obj > now:
-                        pub_time_obj -= timedelta(days=1)
-                except:
-                    pass
+            pub_date = parse_relative_time(pub_label, now)
 
-            if pub_time_obj:
-                pub_date = format_datetime(pub_time_obj)
-            elif pub_label:
-                pub_date = pub_label
-            elif url:
+            if pub_date == "取得不可" and url:
                 pub_date = get_last_modified_datetime(url)
-            else:
-                pub_date = "取得不可"
 
             if title and url:
                 data.append({
