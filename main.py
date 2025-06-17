@@ -78,14 +78,17 @@ def get_last_modified_datetime(url):
 
 def check_if_paid_article(url: str) -> str:
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=10)
         if response.status_code != 200:
             return "-"
         domain = re.search(r"https?://([^/]+)", url)
         domain = domain.group(1) if domain else "default"
         keywords = paid_keywords_by_domain.get(domain, paid_keywords_by_domain["default"])
         text = BeautifulSoup(response.text, "html.parser").get_text()
-        return "有料" if any(kw in text for kw in keywords) else "-"
+        for kw in keywords:
+            if kw in text:
+                return "有料"
+        return "-"
     except:
         return "-"
 
@@ -106,12 +109,18 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
             existing_data = worksheet.get_all_values()
             existing_urls = [row[1] for row in existing_data[1:] if len(row) > 1]
 
+            # 全URLを再チェックしてE列を埋める
             for i, row in enumerate(existing_data[1:], start=2):
-                if len(row) >= 2 and (len(row) < 5 or not row[4]):
-                    url = row[1]
-                    flag = check_if_paid_article(url)
-                    worksheet.update_cell(i, 5, flag)
+                if len(row) >= 2:
+                    url = row[1].strip()
+                    if not url:
+                        continue
+                    needs_check = len(row) < 5 or not row[4].strip()
+                    if needs_check:
+                        flag = check_if_paid_article(url)
+                        worksheet.update_cell(i, 5, flag)
 
+            # 新規記事の追記処理
             new_data = []
             for a in articles:
                 if a['URL'] not in existing_urls:
