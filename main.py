@@ -78,7 +78,8 @@ def get_last_modified_datetime(url):
 
 def check_if_paid_article(url: str) -> str:
     try:
-        response = requests.get(url, timeout=10)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
         if response.status_code != 200:
             return "-"
         domain = re.search(r"https?://([^/]+)", url)
@@ -109,16 +110,14 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
             existing_data = worksheet.get_all_values()
             existing_urls = [row[1] for row in existing_data[1:] if len(row) > 1]
 
-            # 全URLを再チェックしてE列を埋める
+            # 全URLを再チェックしてE列を強制更新
             for i, row in enumerate(existing_data[1:], start=2):
                 if len(row) >= 2:
                     url = row[1].strip()
                     if not url:
                         continue
-                    needs_check = len(row) < 5 or not row[4].strip()
-                    if needs_check:
-                        flag = check_if_paid_article(url)
-                        worksheet.update_cell(i, 5, flag)
+                    flag = check_if_paid_article(url)
+                    worksheet.update_cell(i, 5, flag)
 
             # 新規記事の追記処理
             new_data = []
@@ -138,3 +137,10 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
             time.sleep(5 + random.random() * 5)
 
     raise RuntimeError("❌ Googleスプレッドシートへの書き込みに失敗しました（5回試行しても成功せず）")
+
+if __name__ == "__main__":
+    print("\n--- 有料記事チェック（既存ニュースすべて）---")
+    for sheet_name in ["Yahoo", "Google", "MSN"]:
+        print(f"▶ {sheet_name} シートを処理中...")
+        write_to_spreadsheet([], SPREADSHEET_ID, sheet_name)
+    print("✅ 全シートのチェック完了")
