@@ -110,16 +110,24 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
             existing_data = worksheet.get_all_values()
             existing_urls = [row[1] for row in existing_data[1:] if len(row) > 1]
 
-            # 全URLを再チェックしてE列を強制更新
+            # ✅ 一括で有料チェックを行って結果をE列にまとめる
+            flags = []
+            target_rows = []
             for i, row in enumerate(existing_data[1:], start=2):
                 if len(row) >= 2:
                     url = row[1].strip()
-                    if not url:
-                        continue
-                    flag = check_if_paid_article(url)
-                    worksheet.update_cell(i, 5, flag)
+                    if url:
+                        flag = check_if_paid_article(url)
+                        flags.append([flag])
+                        target_rows.append(i)
 
-            # 新規記事の追記処理
+            # ✅ 範囲指定で一括更新
+            if flags:
+                start_row = target_rows[0]
+                end_row = target_rows[-1]
+                worksheet.update(f"E{start_row}:E{end_row}", flags)
+
+            # ✅ 新規データ追記
             new_data = []
             for a in articles:
                 if a['URL'] not in existing_urls:
