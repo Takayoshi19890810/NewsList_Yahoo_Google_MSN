@@ -65,41 +65,6 @@ def get_last_modified_datetime(url):
         pass
     return "取得不可"
 
-def check_paywall_light(url: str) -> str:
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=5)
-        html = response.text.lower()
-        if any(keyword in html for keyword in ["有料会員", "会員限定", "この記事は有料", "有料コンテンツ"]):
-            return "有料"
-    except:
-        pass
-    return ""
-
-def check_paywall_with_selenium(url: str) -> str:
-    try:
-        options = Options()
-        options.add_argument("--headless")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-        driver.set_page_load_timeout(10)
-        driver.get(url)
-        time.sleep(3)
-        page_text = driver.page_source.lower()
-        driver.quit()
-        if any(keyword in page_text for keyword in ["有料会員", "会員限定", "この記事は有料", "有料コンテンツ", "全文を読むには", "続きを読むには", "ログインしてください"]):
-            return "有料"
-    except:
-        pass
-    return ""
-
-def check_paywall(url: str) -> str:
-    result = check_paywall_light(url)
-    if not result:
-        result = check_paywall_with_selenium(url)
-    return result
-
 def get_google_news_with_selenium(keyword: str) -> list[dict]:
     options = Options()
     options.add_argument("--headless")
@@ -129,7 +94,7 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
             dt = datetime.strptime(time_tag.get("datetime"), "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=9)
             pub_date = format_datetime(dt)
             source = source_tag.text.strip() if source_tag else "N/A"
-            data.append({"タイトル": title, "URL": url, "投稿日": pub_date, "引用元": source, "有料": check_paywall(url)})
+            data.append({"タイトル": title, "URL": url, "投稿日": pub_date, "引用元": source})
         except:
             continue
     print(f"✅ Googleニュース件数: {len(data)} 件")
@@ -141,7 +106,7 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    search_url = f"https://news.yahoo.co.jp/search?p={keyword}&ei=utf-8"
+    search_url = f"https://news.yahoo.co.jp/search?p={keyword}&ei=utf-8&categories=domestic,world,business,it,science,life,local"
     driver.get(search_url)
     time.sleep(5)
 
@@ -188,8 +153,7 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
                     "タイトル": title,
                     "URL": url,
                     "投稿日": formatted_date if formatted_date else "取得不可",
-                    "引用元": source_text,
-                    "有料": check_paywall(url)
+                    "引用元": source_text
                 })
         except:
             continue
@@ -226,6 +190,7 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
                 pub_label = pub_tag["aria-label"].strip().lower()
 
             pub_date = parse_relative_time(pub_label, now)
+
             if pub_date == "取得不可" and url:
                 pub_date = get_last_modified_datetime(url)
 
@@ -234,10 +199,10 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
                     "タイトル": title,
                     "URL": url,
                     "投稿日": pub_date,
-                    "引用元": source if source else "MSN",
-                    "有料": check_paywall(url)
+                    "引用元": source if source else "MSN"
                 })
-        except:
+        except Exception as e:
+            print(f"⚠️ MSN記事処理エラー: {e}")
             continue
 
     print(f"✅ MSNニュース件数: {len(data)} 件")
@@ -254,13 +219,13 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
             try:
                 worksheet = sh.worksheet(worksheet_name)
             except gspread.exceptions.WorksheetNotFound:
-                worksheet = sh.add_worksheet(title=worksheet_name, rows="1", cols="5")
-                worksheet.append_row(['タイトル', 'URL', '投稿日', '引用元', '有料'])
+                worksheet = sh.add_worksheet(title=worksheet_name, rows="1", cols="4")
+                worksheet.append_row(['タイトル', 'URL', '投稿日', '引用元'])
 
             existing_data = worksheet.get_all_values()
             existing_urls = set(row[1] for row in existing_data[1:] if len(row) > 1)
 
-            new_data = [[a['タイトル'], a['URL'], a['投稿日'], a['引用元'], a.get('有料', '')] for a in articles if a['URL'] not in existing_urls]
+            new_data = [[a['タイトル'], a['URL'], a['投稿日'], a['引用元']] for a in articles if a['URL'] not in existing_urls]
             if new_data:
                 worksheet.append_rows(new_data, value_input_option='USER_ENTERED')
                 print(f"✅ {len(new_data)}件をスプレッドシートに追記しました。")
