@@ -78,13 +78,13 @@ def get_last_modified_datetime(url):
 
 def check_if_paid_article(url: str) -> str:
     try:
+        response = requests.get(url, timeout=5)
+        if response.status_code != 200:
+            return "-"
         domain = re.search(r"https?://([^/]+)", url)
         domain = domain.group(1) if domain else "default"
         keywords = paid_keywords_by_domain.get(domain, paid_keywords_by_domain["default"])
-        headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(url, headers=headers, timeout=5)
-        res.encoding = res.apparent_encoding
-        text = BeautifulSoup(res.text, "html.parser").get_text()
+        text = BeautifulSoup(response.text, "html.parser").get_text()
         return "有料" if any(kw in text for kw in keywords) else "-"
     except:
         return "-"
@@ -104,13 +104,19 @@ def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_na
                 worksheet.append_row(['タイトル', 'URL', '投稿日', '引用元', '有料'])
 
             existing_data = worksheet.get_all_values()
-            existing_urls = set(row[1] for row in existing_data[1:] if len(row) > 1)
+            existing_urls = [row[1] for row in existing_data[1:] if len(row) > 1]
+
+            for i, row in enumerate(existing_data[1:], start=2):
+                if len(row) >= 2 and (len(row) < 5 or not row[4]):
+                    url = row[1]
+                    flag = check_if_paid_article(url)
+                    worksheet.update_cell(i, 5, flag)
 
             new_data = []
             for a in articles:
                 if a['URL'] not in existing_urls:
-                    paid_flag = check_if_paid_article(a['URL'])
-                    new_data.append([a['タイトル'], a['URL'], a['投稿日'], a['引用元'], paid_flag])
+                    flag = check_if_paid_article(a['URL'])
+                    new_data.append([a['タイトル'], a['URL'], a['投稿日'], a['引用元'], flag])
 
             if new_data:
                 worksheet.append_rows(new_data, value_input_option='USER_ENTERED')
