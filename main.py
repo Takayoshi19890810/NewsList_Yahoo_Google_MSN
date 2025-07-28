@@ -29,11 +29,11 @@ paid_keywords_by_domain = {
 }
 
 def format_datetime(dt_obj):
-return dt_obj.strftime("%Y/%m/%d %H:%M")
+    return dt_obj.strftime("%Y/%m/%d %H:%M")
 
 @@ -76,22 +65,148 @@
-pass
-return "取得不可"
+        pass
+    return "取得不可"
 
 def check_if_paid_article(url: str) -> str:
     try:
@@ -195,17 +195,17 @@ def get_msn_news_with_selenium(keyword: str) -> list[dict]:
     return data
 
 def write_to_spreadsheet(articles: list[dict], spreadsheet_id: str, worksheet_name: str):
-credentials_json_str = os.environ.get('GCP_SERVICE_ACCOUNT_KEY')
+    credentials_json_str = os.environ.get('GCP_SERVICE_ACCOUNT_KEY')
 @@ -104,36 +219,13 @@
-try:
-worksheet = sh.worksheet(worksheet_name)
-except gspread.exceptions.WorksheetNotFound:
+            try:
+                worksheet = sh.worksheet(worksheet_name)
+            except gspread.exceptions.WorksheetNotFound:
                 worksheet = sh.add_worksheet(title=worksheet_name, rows="1", cols="5")
                 worksheet.append_row(['タイトル', 'URL', '投稿日', '引用元', '有料'])
                 worksheet = sh.add_worksheet(title=worksheet_name, rows="1", cols="4")
                 worksheet.append_row(['タイトル', 'URL', '投稿日', '引用元'])
 
-existing_data = worksheet.get_all_values()
+            existing_data = worksheet.get_all_values()
             existing_urls = [row[1] for row in existing_data[1:] if len(row) > 1]
 
             # ✅ 一括で有料チェックを行って結果をE列にまとめる
@@ -234,11 +234,11 @@ existing_data = worksheet.get_all_values()
             existing_urls = set(row[1] for row in existing_data[1:] if len(row) > 1)
 
             new_data = [[a['タイトル'], a['URL'], a['投稿日'], a['引用元']] for a in articles if a['URL'] not in existing_urls]
-if new_data:
-worksheet.append_rows(new_data, value_input_option='USER_ENTERED')
-print(f"✅ {len(new_data)}件をスプレッドシートに追記しました。")
+            if new_data:
+                worksheet.append_rows(new_data, value_input_option='USER_ENTERED')
+                print(f"✅ {len(new_data)}件をスプレッドシートに追記しました。")
 @@ -147,8 +239,17 @@
-raise RuntimeError("❌ Googleスプレッドシートへの書き込みに失敗しました（5回試行しても成功せず）")
+    raise RuntimeError("❌ Googleスプレッドシートへの書き込みに失敗しました（5回試行しても成功せず）")
 
 if __name__ == "__main__":
     print("\n--- 有料記事チェック（既存ニュースすべて）---")
