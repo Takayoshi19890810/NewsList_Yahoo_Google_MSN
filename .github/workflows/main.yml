@@ -1,48 +1,38 @@
-# .github/workflows/main.yml
-
-name: Run News Scraper (Yahoo! News to Google Sheet) # ワークフロー名
+name: NissanNewsCollector
 
 on:
   schedule:
-    # JSTで毎日15:00に実行 (UTC表記では 06:00)
-    # 必要に応じて他のcron設定もコメント解除して利用できます。
-    # - cron: '*/15 * * * *' # 15分ごと
-    # - cron: '0 * * * *'    # 毎時0分
-    - cron: '0 6 * * *'
-
-  workflow_dispatch: # GitHub上で手動実行を可能にするトリガー
+    - cron: '0 6 * * *'  # JST 15:00 に実行
+  workflow_dispatch:
 
 jobs:
-  scrape-news:
-    runs-on: ubuntu-latest # ワークフローが実行される仮想環境 (Ubuntu Linuxの最新版)
+  run:
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4 # GitHubリポジトリのコードを仮想環境にクローンします
+    - name: Check out code
+      uses: actions/checkout@v3
 
     - name: Set up Python
-      uses: actions/setup-python@v5 # Python環境をセットアップします
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.9' # 使用するPythonのバージョンを指定 (安定版の3.9)
+        python-version: '3.10'
 
     - name: Install dependencies
-      run: | # Pythonの依存関係をインストールします
-        python -m pip install --upgrade pip # pip自体を最新にアップグレード
-        pip cache purge # pipキャッシュを完全にクリアします
-        pip uninstall gspread google-auth -y || true # gspreadとgoogle-authを強制アンインストールします (エラーが出ても続行)
-        pip install --no-cache-dir --force-reinstall -r requirements.txt # requirements.txtに基づいてライブラリをインストール
-                                                                           # --no-cache-dir: パッケージのキャッシュを使わない
-                                                                           # --force-reinstall: 既にインストールされていても強制的に再インストールする
-                                                                           # これにより、古いgspreadの問題を確実に解消します
-
-    - name: Run Scraper and Write to Google Sheet # Pythonスクリプトの実行ステップ
-      env: # 環境変数を設定します
-        # GitHubリポジトリのシークレット「GCP_SERVICE_ACCOUNT_KEY」の値を
-        # Pythonスクリプト内でアクセスできる環境変数として渡します
-        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
       run: |
-        python main.py # main.pyスクリプトを実行します
+        pip install selenium gspread oauth2client beautifulsoup4
 
-    - name: Check for workflow failure (optional)
-      if: ${{ failure() }} # 前のステップで失敗した場合のみ実行されます
-      run: echo "Workflow failed. Check logs for details." # 失敗メッセージを出力し、デバッグを促します
+    - name: Install Chrome & Chromedriver
+      run: |
+        sudo apt update
+        sudo apt install -y wget unzip xvfb libxi6 libgconf-2-4
+        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        sudo dpkg -i google-chrome*.deb || sudo apt -f install -y
+        CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+        wget -O chromedriver.zip https://chromedriver.storage.googleapis.com/${CHROME_VERSION%%.*}/chromedriver_linux64.zip
+        unzip chromedriver.zip
+        sudo mv chromedriver /usr/local/bin/
+        sudo chmod +x /usr/local/bin/chromedriver
+
+    - name: Run news scraper
+      run: python main.py
