@@ -1,38 +1,35 @@
-name: NissanNewsCollector
+name: Run News Scraper (Google & Yahoo)
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # JST 15:00に毎日実行
+    # ✅ JSTで15分ごとに実行するよう変更
+    - cron: '*/15 * * * *' 
+  
+  workflow_dispatch: 
+    # ✅ JSTで15分おき
+    - cron: '*/15 * * * *'
+    # ✅ JSTで毎時0分（1時間おき）
+    - cron: '0 * * * *'
+    # ✅ JSTで毎日15:00（→UTCでは06:00）
+    - cron: '0 6 * * *'
+
   workflow_dispatch:
 
 jobs:
-  run:
+  scrape-news:
+    runs-on: ubuntu-latest 
     runs-on: ubuntu-latest
 
     steps:
-    - name: Check out code
-      uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4 
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.9' 
+        python-version: '3.9'
 
     - name: Install dependencies
       run: |
-        pip install selenium gspread oauth2client beautifulsoup4 requests
-
-    - name: Install Chrome & Chromedriver
-      run: |
-        sudo apt update
-        sudo apt install -y wget unzip xvfb libxi6
-        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo dpkg -i google-chrome*.deb || sudo apt -f install -y
-        CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
-        wget -O chromedriver.zip https://chromedriver.storage.googleapis.com/${CHROME_VERSION%%.*}/chromedriver_linux64.zip
-        unzip chromedriver.zip
-        sudo mv chromedriver /usr/local/bin/
-        sudo chmod +x /usr/local/bin/chromedriver
-
-    - name: Run Nissan news scraper
-      run: python main.py
