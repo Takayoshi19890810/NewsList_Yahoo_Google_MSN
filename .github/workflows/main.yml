@@ -2,10 +2,6 @@ name: Run News Scraper (Google & Yahoo)
 
 on:
   schedule:
-    # ✅ JSTで15分ごとに実行するよう変更
-    - cron: '*/15 * * * *' 
-  
-  workflow_dispatch: 
     # ✅ JSTで15分おき
     - cron: '*/15 * * * *'
     # ✅ JSTで毎時0分（1時間おき）
@@ -17,19 +13,28 @@ on:
 
 jobs:
   scrape-news:
-    runs-on: ubuntu-latest 
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4 
       uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9' 
         python-version: '3.9'
 
     - name: Install dependencies
       run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Scraper
+      env:
+        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      run: |
+        python main.py
+
+    - name: Check for workflow failure (optional)
+      if: ${{ failure() }}
+      run: echo "Workflow failed. Check logs for details."
