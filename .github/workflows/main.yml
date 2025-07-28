@@ -2,7 +2,7 @@ name: NissanNewsCollector
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # JST 15:00 に実行
+    - cron: '0 6 * * *'  # JST 15:00に毎日実行
   workflow_dispatch:
 
 jobs:
@@ -20,12 +20,12 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install selenium gspread oauth2client beautifulsoup4
+        pip install selenium gspread oauth2client beautifulsoup4 requests
 
     - name: Install Chrome & Chromedriver
       run: |
         sudo apt update
-        sudo apt install -y wget unzip xvfb libxi6 libgconf-2-4
+        sudo apt install -y wget unzip xvfb libxi6
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo dpkg -i google-chrome*.deb || sudo apt -f install -y
         CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
@@ -34,5 +34,5 @@ jobs:
         sudo mv chromedriver /usr/local/bin/
         sudo chmod +x /usr/local/bin/chromedriver
 
-    - name: Run news scraper
+    - name: Run Nissan news scraper
       run: python main.py
