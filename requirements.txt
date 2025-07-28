@@ -1,5 +1,5 @@
 gspread
-oauth2client
 selenium
-beautifulsoup4
+webdriver_manager
 requests
+beautifulsoup4
