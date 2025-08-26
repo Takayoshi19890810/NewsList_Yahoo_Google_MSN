@@ -1,2 +1,2 @@
 # Yahoo-_news
-Yahoo ニュースの取得
+Yahoo&MSN&Googleニュースの取得
