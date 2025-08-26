@@ -2,8 +2,6 @@ name: Run News Scraper (Google & Yahoo)
 
 on:
   schedule:
-    # ✅ JSTで15分おき
-    - cron: '*/15 * * * *'
     # ✅ JSTで毎時0分（1時間おき）
     - cron: '0 * * * *'
     # ✅ JSTで毎日15:00（→UTCでは06:00）
