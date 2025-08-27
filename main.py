@@ -14,9 +14,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import gspread
 
-# ★ ここを更新：キーワードとスプレッドシートID
-KEYWORD = "ホンダ"
-SPREADSHEET_ID = "1AwwMGKMHfduwPkrtsik40lkO1z1T8IU_yd41ku-yPi8"
+KEYWORD = "日産"
+SPREADSHEET_ID = "1RglATeTbLU1SqlfXnNToJqhXLdNoHCdePldioKDQgU8"
 
 def format_datetime(dt_obj):
     return dt_obj.strftime("%Y/%m/%d %H:%M")
@@ -60,8 +59,7 @@ def get_last_modified_datetime(url):
         response = requests.head(url, timeout=5)
         if 'Last-Modified' in response.headers:
             dt = parsedate_to_datetime(response.headers['Last-Modified'])
-            # JSTに見かけ上変換（厳密なtzinfoは省略）
-            jst = dt + timedelta(hours=9)
+            jst = dt.astimezone(tz=timedelta(hours=9))
             return format_datetime(jst)
     except:
         pass
@@ -92,12 +90,11 @@ def get_google_news_with_selenium(keyword: str) -> list[dict]:
             source_tag = article.select_one("div.vr1PYe")
             title = a_tag.text.strip()
             href = a_tag.get("href")
-            url = "https://news.google.com" + href[1:] if href and href.startswith("./") else href
+            url = "https://news.google.com" + href[1:] if href.startswith("./") else href
             dt = datetime.strptime(time_tag.get("datetime"), "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=9)
             pub_date = format_datetime(dt)
             source = source_tag.text.strip() if source_tag else "N/A"
-            if title and url:
-                data.append({"タイトル": title, "URL": url, "投稿日": pub_date, "引用元": source})
+            data.append({"タイトル": title, "URL": url, "投稿日": pub_date, "引用元": source})
         except:
             continue
     print(f"✅ Googleニュース件数: {len(data)} 件")
